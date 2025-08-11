@@ -78,6 +78,8 @@ async function getVideoById(videoId) {
   return collection.findOne({ _id: new ObjectId(videoId) });
 }
 
+
+// comments functions =================================================================================
 async function addComment({ videoId, uid, text }) {
   if (!videoId || !uid || !text) throw new Error('missing data');
   const comments = await getCollection('comments');
@@ -92,7 +94,26 @@ async function getComments(videoId, limit = 50) {
 }
 
 
-
+// rating functions =================================================================================
+async function upsertRating({ videoId, uid, value }) {
+  // value: 1 (like) or -1 (dislike) or 0 remove
+  const ratings = await getCollection('ratings');
+  if (value === 0) {
+    return ratings.deleteOne({ videoId, uid });
+  }
+  const update = { $set: { videoId, uid, value, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } };
+  return ratings.updateOne({ videoId, uid }, update, { upsert: true });
+}
+async function getRatingSummary(videoId) {
+  const ratings = await getCollection('ratings');
+  // aggregate counts
+  const pipeline = [
+    { $match: { videoId } },
+    { $group: { _id: '$videoId', likes: { $sum: { $cond: [{ $eq: ['$value', 1] }, 1, 0] } }, dislikes: { $sum: { $cond: [{ $eq: ['$value', -1] }, 1, 0] } } } }
+  ];
+  const [res] = await ratings.aggregate(pipeline).toArray();
+  return res || { likes: 0, dislikes: 0 };
+}
 
 
 module.exports = {
@@ -104,4 +125,6 @@ module.exports = {
   getVideoById,
   addComment,
   getComments,
+  upsertRating,
+  getRatingSummary,
 };

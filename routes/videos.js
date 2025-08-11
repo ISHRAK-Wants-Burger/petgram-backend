@@ -133,5 +133,26 @@ router.post('/:id/comments', auth, async (req, res) => {
 });
 
 
+// POST /api/videos/:id/rate  { value: 1 | -1 | 0 } requires auth ========================================================
+router.post('/:id/rate', auth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const value = parseInt(req.body.value, 10);
+    if (![1, -1, 0].includes(value)) return res.status(400).json({ error: 'Invalid rating' });
+    await require('../services/cosmosService').upsertRating({ videoId: req.params.id, uid, value });
+    const summary = await require('../services/cosmosService').getRatingSummary(req.params.id);
+    res.json({ success: true, summary });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Rating failed' });
+  }
+});
+// GET /api/videos/:id/rating-summary
+router.get('/:id/rating-summary', async (req, res) => {
+  try {
+    const summary = await require('../services/cosmosService').getRatingSummary(req.params.id);
+    res.json(summary);
+  } catch (err) { res.status(500).json({ error: 'Could not load rating' }); }
+});
 
 module.exports = router;
