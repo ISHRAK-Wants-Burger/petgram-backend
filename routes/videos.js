@@ -4,40 +4,73 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 
-const auth = require('../services/authMiddleware'); // must export a function
+const auth = require('../services/authMiddleware'); // verifies token and sets req.user
+const ensureCreator = require('../services/ensureCreator'); // ensures req.user.role === 'creator'
+const cosmos = require('../services/cosmosService'); // DB helpers (getCollection, saveVideoMetadata, etc.)
 const { convertToMp4 } = require('../services/ffmpegService');
 const { uploadFile } = require('../services/blobService');
-const { saveVideoMetadata, getAllVideos } = require('../services/cosmosService');
-const ensureCreator = require('../services/ensureCreator');
 
 const router = express.Router();
 
-// create uploads directory path and multer instance BEFORE using it
+/**
+ * Setup uploads dir + multer
+ */
 const uploadsDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 const upload = multer({ dest: uploadsDir });
 
-console.log('auth type:', typeof auth);               
-console.log('upload single type:', typeof upload.single); 
+/**
+ * GET /api/videos
+ * List videos, supports query params: search, sort (latest|popular), creator, limit, skip
+ * Public endpoint (no auth required)
+ */
+router.get('/', async (req, res) => {
+  try {
+    const { search, sort, creator, limit = 20, skip = 0 } = req.query;
+    const col = await cosmos.getCollection('videos');
 
+    const filter = {};
+    if (search) filter.title = { $regex: search, $options: 'i' };
+    if (creator) filter.creatorId = creator;
 
+    let cursor = col.find(filter);
 
+    // default sort: newest first
+    if (sort === 'popular') {
+      // NOTE: popular sort requires denormalized field like `likeCount` or aggregation.
+      // For now, fall back to createdAt desc (you can change to aggregate later).
+      cursor = cursor.sort({ createdAt: -1 });
+    } else {
+      cursor = cursor.sort({ createdAt: -1 });
+    }
 
+    const results = await cursor.skip(parseInt(skip, 10)).limit(parseInt(limit, 10)).toArray();
+    res.json(results);
+  } catch (err) {
+    console.error('Search videos error', err);
+    res.status(500).json({ error: 'Could not search videos' });
+  }
+});
 
-
-// uploading video to the server=======================================================================================
-router.post('/upload', auth, upload.single('video'), async (req, res) => {
+/**
+ * POST /api/videos/upload
+ * Upload video (creator only). Order: auth -> ensureCreator -> multer -> handler
+ */
+router.post('/upload', auth, ensureCreator, upload.single('video'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const inputPath = req.file.path;
     const mp4Path = await convertToMp4(inputPath);
+
+    // delete original upload
     try { fs.unlinkSync(inputPath); } catch (e) { /* ignore */ }
 
     const blobName = `${req.user.uid}_${Date.now()}.mp4`;
     const url = await uploadFile(mp4Path, blobName);
 
+    // cleanup converted file
     try { fs.unlinkSync(mp4Path); } catch (e) { /* ignore */ }
 
     const metadata = {
@@ -46,48 +79,8 @@ router.post('/upload', auth, upload.single('video'), async (req, res) => {
       url,
       createdAt: new Date(),
     };
-    const videoId = await saveVideoMetadata(metadata);
 
-    res.json({ videoId, url });
-  } catch (err) {
-    console.error('Upload route error:', err);
-    res.status(500).json({ error: err.message || 'Upload failed' });
-  }
-});
-// fetching all videos from database
-router.get('/', auth, async (req, res) => {
-  try {
-    const list = await getAllVideos();
-    res.json(list);
-  } catch (err) {
-    console.error('Get videos error:', err);
-    res.status(500).json({ error: 'Could not fetch videos' });
-  }
-});
-
-
-// make sures the user is a creator before allowing video uploads
-router.post('/upload', auth, ensureCreator, upload.single('video'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-    const inputPath = req.file.path;
-    const mp4Path = await convertToMp4(inputPath);
-    // delete original upload if desired
-    fs.unlinkSync(inputPath);
-
-    const blobName = `${req.user.uid}_${Date.now()}.mp4`;
-    const url = await uploadFile(mp4Path, blobName);
-
-    try { fs.unlinkSync(mp4Path); } catch (e) {}
-
-    const metadata = {
-      title: req.body.title || 'Untitled',
-      creatorId: req.user.uid,
-      url,
-      createdAt: new Date()
-    };
-    const insertedId = await saveVideoMetadata(metadata);
+    const insertedId = await cosmos.saveVideoMetadata(metadata);
 
     res.json({ success: true, videoId: insertedId, url });
   } catch (err) {
@@ -96,63 +89,136 @@ router.post('/upload', auth, ensureCreator, upload.single('video'), async (req, 
   }
 });
 
-
-// GET /api/videos/:id; gets a video by ID =============================================================================
-router.get('/:id', async (req, res) => {
+/**
+ * GET /api/videos/:id/ratings
+ * Returns { likes, dislikes }
+ */
+router.get('/:id/ratings', async (req, res) => {
   try {
     const { id } = req.params;
-    const video = await require('../services/cosmosService').getVideoById(id);
-    if (!video) return res.status(404).json({ error: 'Video not found' });
-    res.json(video);
+    const summary = await cosmos.getRatingSummary(id);
+    return res.json(summary);
   } catch (err) {
-    console.error('Get video error:', err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Get ratings error:', err);
+    return res.status(500).json({ error: 'Could not load ratings' });
   }
 });
 
-
-// gets all the comments===============================================================================================
-router.get('/:id/comments', async (req, res) => {
-  try {
-    const list = await require('../services/cosmosService').getComments(req.params.id);
-    res.json(list);
-  } catch (err) { res.status(500).json({ error: 'Could not load comments' }); }
-});
-// POST comment (auth required)
-router.post('/:id/comments', auth, async (req, res) => {
+/**
+ * POST /api/videos/:id/like
+ * POST /api/videos/:id/dislike
+ * Both require auth
+ */
+router.post('/:id/like', auth, async (req, res) => {
   try {
     const uid = req.user.uid;
-    const text = req.body.text;
-    if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Empty comment' });
-    const id = await require('../services/cosmosService').addComment({ videoId: req.params.id, uid, text: text.trim() });
-    res.json({ success: true, id });
+    const { id } = req.params;
+    await cosmos.upsertRating({ videoId: id, uid, value: 1 });
+    const summary = await cosmos.getRatingSummary(id);
+    return res.json({ success: true, summary });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Could not add comment' });
+    console.error('Like error:', err);
+    return res.status(500).json({ error: 'Could not save like' });
   }
 });
 
+router.post('/:id/dislike', auth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const { id } = req.params;
+    await cosmos.upsertRating({ videoId: id, uid, value: -1 });
+    const summary = await cosmos.getRatingSummary(id);
+    return res.json({ success: true, summary });
+  } catch (err) {
+    console.error('Dislike error:', err);
+    return res.status(500).json({ error: 'Could not save dislike' });
+  }
+});
 
-// POST /api/videos/:id/rate  { value: 1 | -1 | 0 } requires auth ========================================================
+/**
+ * POST /api/videos/:id/rate
+ * Generic rating endpoint that accepts { value: 1 | -1 | 0 } in the body
+ */
 router.post('/:id/rate', auth, async (req, res) => {
   try {
     const uid = req.user.uid;
-    const value = parseInt(req.body.value, 10);
+    const { id } = req.params;
+    const value = Number(req.body.value);
     if (![1, -1, 0].includes(value)) return res.status(400).json({ error: 'Invalid rating' });
-    await require('../services/cosmosService').upsertRating({ videoId: req.params.id, uid, value });
-    const summary = await require('../services/cosmosService').getRatingSummary(req.params.id);
-    res.json({ success: true, summary });
+
+    await cosmos.upsertRating({ videoId: id, uid, value });
+    const summary = await cosmos.getRatingSummary(id);
+    return res.json({ success: true, summary });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Rating failed' });
+    console.error('Rate error:', err);
+    return res.status(500).json({ error: 'Could not save rating' });
   }
 });
-// GET /api/videos/:id/rating-summary
-router.get('/:id/rating-summary', async (req, res) => {
+
+/**
+ * GET /api/videos/:id/comments
+ * Public: list comments for a video
+ */
+// router.get('/:id/comments', async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const list = await cosmos.getComments(id);
+//     return res.json(list);
+//   } catch (err) {
+//     console.error('Get comments error:', err);
+//     return res.status(500).json({ error: 'Could not load comments' });
+//   }
+// });
+// debug-get-comments (temporary)
+router.get('/:id/comments', async (req, res) => {
+  const { id } = req.params;
+  console.log(`[DEBUG] GET /api/videos/${id}/comments - handler entered`);
   try {
-    const summary = await require('../services/cosmosService').getRatingSummary(req.params.id);
-    res.json(summary);
-  } catch (err) { res.status(500).json({ error: 'Could not load rating' }); }
+    const list = await cosmos.getComments(id);
+    console.log(`[DEBUG] getComments returned type=${Array.isArray(list) ? 'array' : typeof list} length=${Array.isArray(list) ? list.length : 'N/A'}`);
+    return res.json(list);
+  } catch (err) {
+    console.error(`[DEBUG] Get comments error for video ${id}:`, err && err.stack ? err.stack : err);
+    return res.status(500).json({ error: 'Could not load comments', detail: String(err && err.message ? err.message : err) });
+  }
+});
+
+
+/**
+ * POST /api/videos/:id/comments
+ * Auth required: create a new comment
+ * Body: { text: "..." }
+ */
+router.post('/:id/comments', auth, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+    const { id } = req.params;
+    const { text } = req.body;
+    if (!text || !text.trim()) return res.status(400).json({ error: 'Empty comment' });
+
+    const insertedId = await cosmos.addComment({ videoId: id, uid, text: text.trim() });
+    return res.json({ success: true, id: insertedId });
+  } catch (err) {
+    console.error('Add comment error:', err);
+    return res.status(500).json({ error: 'Could not add comment' });
+  }
+});
+
+/**
+ * GET /api/videos/:id
+ * Fetch a single video document (metadata)
+ * Keep this near the bottom so other /:id/xxx routes match first.
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const video = await cosmos.getVideoById(id);
+    if (!video) return res.status(404).json({ error: 'Video not found' });
+    return res.json(video);
+  } catch (err) {
+    console.error('Get video error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
 });
 
 module.exports = router;
