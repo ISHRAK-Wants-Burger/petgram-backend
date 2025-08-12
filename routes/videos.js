@@ -155,21 +155,7 @@ router.post('/:id/rate', auth, async (req, res) => {
   }
 });
 
-/**
- * GET /api/videos/:id/comments
- * Public: list comments for a video
- */
-// router.get('/:id/comments', async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const list = await cosmos.getComments(id);
-//     return res.json(list);
-//   } catch (err) {
-//     console.error('Get comments error:', err);
-//     return res.status(500).json({ error: 'Could not load comments' });
-//   }
-// });
-// debug-get-comments (temporary)
+
 router.get('/:id/comments', async (req, res) => {
   const { id } = req.params;
   console.log(`[DEBUG] GET /api/videos/${id}/comments - handler entered`);
@@ -189,20 +175,33 @@ router.get('/:id/comments', async (req, res) => {
  * Auth required: create a new comment
  * Body: { text: "..." }
  */
+// inside backend/routes/videos.js (or wherever your POST /:id/comments lives)
 router.post('/:id/comments', auth, async (req, res) => {
   try {
     const uid = req.user.uid;
-    const { id } = req.params;
+    const { id } = req.params;           // video id
     const { text } = req.body;
+
     if (!text || !text.trim()) return res.status(400).json({ error: 'Empty comment' });
 
-    const insertedId = await cosmos.addComment({ videoId: id, uid, text: text.trim() });
+    // get user profile to fetch name
+    const profile = await require('../services/cosmosService').getUserProfile(uid);
+    const userName = (profile && (profile.name || profile.displayName)) || null;
+
+    const insertedId = await require('../services/cosmosService').addComment({
+      videoId: id,
+      uid,
+      text: text.trim(),
+      userName
+    });
+
     return res.json({ success: true, id: insertedId });
   } catch (err) {
     console.error('Add comment error:', err);
     return res.status(500).json({ error: 'Could not add comment' });
   }
 });
+
 
 /**
  * GET /api/videos/:id

@@ -4,6 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const videoRoutes = require('./routes/videos');
 const usersRoute = require('./routes/users');
+const commentsRouter = require('./routes/comments');
+
 
 const app = express();
 app.use(cors());
@@ -17,7 +19,7 @@ app.use('/api/videos', videoRoutes);
 //for user management, mount under /api/users
 app.use('/api/users', usersRoute);
 
-
+app.use('/api/comments', commentsRouter);
 
 
 

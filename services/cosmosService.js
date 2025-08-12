@@ -50,7 +50,8 @@ async function getAllVideos() {
 /**
  * Upsert a user profile into 'users' collection.
  */
-async function upsertUserProfile({ uid, email = null, role = 'consumer' } = {}) {
+// backend/services/cosmosService.js
+async function upsertUserProfile({ uid, email = null, role = 'consumer', name = null, dob = null } = {}) {
   if (!uid) throw new Error('uid is required for upsertUserProfile');
   const usersCol = await getCollection('users');
   const update = {
@@ -58,6 +59,8 @@ async function upsertUserProfile({ uid, email = null, role = 'consumer' } = {}) 
       uid,
       email,
       role,
+      name: name || null,
+      dob: dob || null,
       updatedAt: new Date(),
     },
     $setOnInsert: {
@@ -67,6 +70,7 @@ async function upsertUserProfile({ uid, email = null, role = 'consumer' } = {}) 
   const result = await usersCol.updateOne({ uid }, update, { upsert: true });
   return result;
 }
+
 
 /**
  * Get a user profile by uid.
@@ -109,10 +113,16 @@ async function getVideoById(videoId) {
  * Add a comment doc to 'comments' collection.
  * doc: { videoId (string), uid, text, createdAt }
  */
-async function addComment({ videoId, uid, text }) {
+async function addComment({ videoId, uid, text, userName = null }) {
   if (!videoId || !uid || !text) throw new Error('missing data');
   const comments = await getCollection('comments');
-  const doc = { videoId: String(videoId), uid, text, createdAt: new Date() };
+  const doc = {
+    videoId: String(videoId),
+    uid,
+    userName: userName || null,   // <-- store display name (nullable)
+    text,
+    createdAt: new Date()
+  };
   const r = await comments.insertOne(doc);
   return r.insertedId;
 }
@@ -174,6 +184,12 @@ async function getRatingSummary(videoId) {
   if (!arr || arr.length === 0) return { likes: 0, dislikes: 0 };
   return { likes: arr[0].likes || 0, dislikes: arr[0].dislikes || 0 };
 }
+
+
+
+
+
+
 
 /* ------------------ exports ------------------ */
 module.exports = {
