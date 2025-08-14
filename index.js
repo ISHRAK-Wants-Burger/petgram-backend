@@ -14,9 +14,9 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
-app.use('/videos', videoRoutes);
-app.use('/users', usersRoute);
-app.use('/comments', commentsRouter);
+app.use('/api/videos', videoRoutes);
+app.use('/api/users', usersRoute);
+app.use('/api/comments', commentsRouter);
 
 // Health check (root)
 app.get('/', (req, res) => res.send('Backend server is running.'));
