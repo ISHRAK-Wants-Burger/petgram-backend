@@ -1,28 +1,24 @@
 {
-  "name": "petgram-backend",
+  "name": "petgram-functions-wrapper",
   "version": "1.0.0",
-  "main": "index.js",
+  "private": true,
+  "main": "HttpTrigger/index.js",
   "engines": {
     "node": "20.x"
   },
   "scripts": {
-    "start": "node index.js",
+    "start": "node HttpTrigger/index.js",
     "test": "echo \"No tests specified\" && exit 0"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "@azure/storage-blob": "^12.28.0",
+    "azure-function-express": "^1.0.0",
+    "express": "^5.1.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
-    "express": "^5.1.0",
     "firebase-admin": "^13.4.0",
     "fluent-ffmpeg": "^2.1.3",
     "mongodb": "^6.18.0",
     "multer": "^2.0.2",
-    "serverless-http": "^3.2.0",
-    "azure-function-express": "^1.0.0"
+    "@azure/storage-blob": "^12.28.0"
   }
 }
