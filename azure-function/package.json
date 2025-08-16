@@ -1,8 +1,8 @@
 {
-  "name": "petgram-functions-wrapper",
+  "name": "petgram-backend",
   "version": "1.0.0",
   "private": true,
-  "main": "HttpTrigger/index.js",
+  "main": "index.js",
   "engines": {
     "node": "20.x"
   },
