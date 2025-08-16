@@ -5,7 +5,7 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["get", "post", "put", "delete", "patch", "options"],
+      "methods": ["get","post","put","delete","options","patch"],
       "route": "{*segments}"
     },
     {
@@ -13,5 +13,6 @@
       "direction": "out",
       "name": "res"
     }
-  ]
+  ],
+  "scriptFile": "index.js"
 }
