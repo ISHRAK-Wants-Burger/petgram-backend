@@ -2,7 +2,7 @@
 const express = require('express');
 const admin = require('../firebaseAdmin');          // Firebase Admin SDK
 const auth = require('../services/authMiddleware'); // Verifies token, sets req.user
-const { upsertUserProfile, getCollection } = require('../services/cosmosService');
+const { upsertUserProfile, getCollection, getCollectionUsers } = require('../services/cosmosService');
 
 const router = express.Router();
 
@@ -55,5 +55,22 @@ router.post('/promote', auth, async (req, res) => {
     return res.status(500).json({ error: 'Could not promote user' });
   }
 });
+
+router.get('/', async (req, res) => {
+  try {
+    const usersCollection = await getCollection('users');  // Fetch the 'users' collection
+    const users = await usersCollection.find().toArray();  // Fetch all users and convert to an array
+
+    if (!users) {
+      return res.status(404).json({ error: 'No users found' });
+    }
+
+    res.json({ users });  // Return all users as JSON
+  } catch (err) {
+    console.error('Error fetching users:', err);
+    return res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
 
 module.exports = router;

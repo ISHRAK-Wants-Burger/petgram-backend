@@ -74,8 +74,10 @@ router.post('/upload', auth, ensureCreator, upload.single('video'), async (req, 
     try { fs.unlinkSync(mp4Path); } catch (e) { /* ignore */ }
 
     const metadata = {
-      title: req.body.title || 'Untitled',
-      creatorId: req.user.uid,
+      title: req?.body?.title || 'Untitled',
+      uploaderName: req?.body?.uploaderName || 'Unnamed',
+      genre: req?.body?.genre || 'Uncategorized',
+      creatorId: req?.user?.uid,
       url,
       createdAt: new Date(),
     };
