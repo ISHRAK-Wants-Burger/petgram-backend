@@ -109,7 +109,6 @@ router.get('/:id/ratings', async (req, res) => {
 /**
  * POST /api/videos/:id/like
  * POST /api/videos/:id/dislike
- * Both require auth
  */
 router.post('/:id/like', auth, async (req, res) => {
   try {
